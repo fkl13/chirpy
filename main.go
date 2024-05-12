@@ -22,9 +22,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(http.StatusText(http.StatusOK)))
 	})
-	mux.Handle("GET /api/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
-	mux.Handle("/api/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
-	// mux.HandleFunc("/metrics", apiCfg.handlerMetrics)
+	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
+	mux.Handle("GET /api/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
 
 	corsMux := middlewareCors(mux)
 
@@ -53,9 +52,17 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func (cfg *apiConfig) getMetricHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	template := `<html>
+<body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+</body>
+</html>
+`
+
+	w.Header().Add("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("Hits: %d\n", cfg.fileserverHits)))
+	w.Write([]byte(fmt.Sprintf(template, cfg.fileserverHits)))
 }
 
 func (cfg *apiConfig) resetMetricHandler(w http.ResponseWriter, r *http.Request) {
