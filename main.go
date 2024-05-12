@@ -17,13 +17,13 @@ func main() {
 	apiConfig := apiConfig{}
 
 	mux.Handle("/app/", apiConfig.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(http.StatusText(http.StatusOK)))
 	})
-	mux.Handle("/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
-	mux.Handle("/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
+	mux.Handle("GET /api/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
+	mux.Handle("/api/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
 	// mux.HandleFunc("/metrics", apiCfg.handlerMetrics)
 
 	corsMux := middlewareCors(mux)
