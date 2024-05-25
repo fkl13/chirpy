@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type apiConfig struct {
@@ -74,55 +75,11 @@ func (cfg *apiConfig) resetMetricHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func validateChripHandler(w http.ResponseWriter, r *http.Request) {
-	type chrip struct {
-		Body string `json:"body"`
-	}
-	type errorBody struct {
-		Error string `json:"error"`
-	}
-	type successBody struct {
-		Valid bool `json:"valid"`
-	}
-	w.Header().Set("Content-Type", "application/json")
-	var statusCode int = 200
-	var message []byte
-
-	decoder := json.NewDecoder(r.Body)
-	params := chrip{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		respBody := errorBody{
-			Error: "Error decoding parameters",
-		}
-		message, _ = json.Marshal(respBody)
-		statusCode = 500
-	}
-
-	if len(params.Body) > 140 {
-		respBody := errorBody{
-			Error: "Chirp is too long",
-		}
-		message, _ = json.Marshal(respBody)
-		statusCode = 400
-	} else {
-		respBody := successBody{
-			Valid: true,
-		}
-		message, _ = json.Marshal(respBody)
-	}
-
-	w.WriteHeader(statusCode)
-	w.Write(message)
-
-	return
-}
-
-func handlerChirpsValidate(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
 	}
 	type returnVals struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -139,9 +96,29 @@ func handlerChirpsValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	badWords := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+	cleaned := cleanRequestBody(params.Body, badWords)
+
 	respondWithJSON(w, http.StatusOK, returnVals{
-		Valid: true,
+		CleanedBody: cleaned,
 	})
+}
+
+func cleanRequestBody(body string, badWords map[string]struct{}) string {
+	words := strings.Split(body, " ")
+	for i, word := range words {
+		lowercaseWord := strings.ToLower(word)
+		if _, ok := badWords[lowercaseWord]; ok {
+			words[i] = "****"
+		}
+	}
+
+	cleaned := strings.Join(words, " ")
+	return cleaned
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
