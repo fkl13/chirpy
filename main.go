@@ -37,6 +37,8 @@ func main() {
 	mux.Handle("GET /api/chirps", http.HandlerFunc(apiConfig.getChripsHandler))
 	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(apiConfig.getChripByIdHandler))
 
+	mux.Handle("POST /api/users", http.HandlerFunc(apiConfig.createUserHandler))
+
 	corsMux := middlewareCors(mux)
 
 	log.Printf("Serving on port: %s\n", port)
@@ -156,6 +158,28 @@ func (cfg *apiConfig) createChripHandler(w http.ResponseWriter, r *http.Request)
 		Id:   chirp.Id,
 		Body: chirp.Body,
 	})
+}
+
+func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters")
+		return
+	}
+
+	user, err := cfg.db.CreateUser(params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, user)
 }
 
 func cleanRequestBody(body string, badWords map[string]struct{}) string {
