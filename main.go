@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -34,6 +35,7 @@ func main() {
 
 	mux.Handle("POST /api/chirps", http.HandlerFunc(apiConfig.createChripHandler))
 	mux.Handle("GET /api/chirps", http.HandlerFunc(apiConfig.getChripsHandler))
+	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(apiConfig.getChripByIdHandler))
 
 	corsMux := middlewareCors(mux)
 
@@ -97,6 +99,22 @@ func (cfg *apiConfig) getChripsHandler(w http.ResponseWriter, r *http.Request) {
 		return chirps[i].Id < chirps[j].Id
 	})
 	respondWithJSON(w, http.StatusOK, chirps)
+}
+
+func (cfg *apiConfig) getChripByIdHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Invalid id")
+		return
+	}
+
+	chirp, err := cfg.db.GetChirp(id)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't find chirp")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, chirp)
 }
 
 func (cfg *apiConfig) createChripHandler(w http.ResponseWriter, r *http.Request) {
