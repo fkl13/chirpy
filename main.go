@@ -5,28 +5,35 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 )
 
 type apiConfig struct {
 	fileserverHits int
+	db             *DB
 }
 
 func main() {
 	const port = "8080"
+	const dbPath = "./database.json"
+
+	db, err := NewDB(dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	mux := http.NewServeMux()
 
-	apiConfig := apiConfig{}
+	apiConfig := apiConfig{db: db}
 
 	mux.Handle("/app/*", apiConfig.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
-	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(http.StatusText(http.StatusOK)))
-	})
+	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
 	mux.Handle("GET /api/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
-	mux.Handle("POST /api/validate_chirp", http.HandlerFunc(validateChripHandler))
+
+	mux.Handle("POST /api/chirps", http.HandlerFunc(apiConfig.createChripHandler))
+	mux.Handle("GET /api/chirps", http.HandlerFunc(apiConfig.getChripsHandler))
 
 	corsMux := middlewareCors(mux)
 
@@ -45,6 +52,12 @@ func middlewareCors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func healthzHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -74,12 +87,25 @@ func (cfg *apiConfig) resetMetricHandler(w http.ResponseWriter, r *http.Request)
 	w.Write([]byte("Hits reset to 0"))
 }
 
-func validateChripHandler(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) getChripsHandler(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.db.GetChirps()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get chirps")
+		return
+	}
+	sort.Slice(chirps, func(i, j int) bool {
+		return chirps[i].Id < chirps[j].Id
+	})
+	respondWithJSON(w, http.StatusOK, chirps)
+}
+
+func (cfg *apiConfig) createChripHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
 	}
 	type returnVals struct {
-		CleanedBody string `json:"cleaned_body"`
+		Id   int    `json:"id"`
+		Body string `json:"body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -95,7 +121,6 @@ func validateChripHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
 		return
 	}
-
 	badWords := map[string]struct{}{
 		"kerfuffle": {},
 		"sharbert":  {},
@@ -103,8 +128,15 @@ func validateChripHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	cleaned := cleanRequestBody(params.Body, badWords)
 
-	respondWithJSON(w, http.StatusOK, returnVals{
-		CleanedBody: cleaned,
+	chirp, err := cfg.db.CreateChirp(cleaned)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create chirp")
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, returnVals{
+		Id:   chirp.Id,
+		Body: chirp.Body,
 	})
 }
 
