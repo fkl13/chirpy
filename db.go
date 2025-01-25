@@ -41,6 +41,14 @@ func NewDB(path string) (*DB, error) {
 	return db, err
 }
 
+func DeleteDB(path string) error {
+	err := os.Remove(path)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // CreateChirp creates a new chirp and saves it to disk
 func (db *DB) CreateChirp(body string) (Chirp, error) {
 	dbStructure, err := db.loadDB()
