@@ -9,8 +9,10 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/fkl13/chirpy/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -18,6 +20,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform       string
 }
 
 func main() {
@@ -40,20 +43,24 @@ func main() {
 	}
 	defer dbConn.Close()
 
+	platform := os.Getenv("PLATFORM")
+
 	dbQueries := database.New(dbConn)
 	apiConfig := apiConfig{
 		dbQueries:      dbQueries,
 		fileserverHits: atomic.Int32{},
+		platform:       platform,
 	}
 
 	mux := http.NewServeMux()
 
 	mux.Handle("/app/", apiConfig.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
-	mux.HandleFunc("POST /api/validate_chirp", handlerChirpsValidate)
+	mux.HandleFunc("POST /api/validate_chirp", validateChirpsHandler)
+	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
 
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
-	mux.Handle("GET /admin/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
+	mux.Handle("POST /admin/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -92,12 +99,21 @@ func (cfg *apiConfig) getMetricHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) resetMetricHandler(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		respondWithError(w, http.StatusForbidden, "Access not allowed", fmt.Errorf("couldn't delete db"))
+	}
+
 	cfg.fileserverHits.Store(0)
+	err := cfg.dbQueries.DeleteUsers(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "couldn't delete users", err)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Hits reset to 0"))
 }
 
-func handlerChirpsValidate(w http.ResponseWriter, r *http.Request) {
+func validateChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
 	}
@@ -144,29 +160,34 @@ func cleanRequestBody(body string, badWords map[string]struct{}) string {
 	return cleaned
 }
 
-func respondWithError(w http.ResponseWriter, code int, msg string, err error) {
-	if err != nil {
-		log.Println(err)
+func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
 	}
-	if code > 499 {
-		log.Printf("Responding with 5XX error: %s", msg)
+	type returnVals struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at "`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
 	}
-	type errorResponse struct {
-		Error string `json:"error"`
-	}
-	respondWithJSON(w, code, errorResponse{
-		Error: msg,
-	})
-}
 
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	dat, err := json.Marshal(payload)
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
 	}
-	w.WriteHeader(code)
-	w.Write(dat)
+
+	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't store user", err)
+		return
+	}
+	respondWithJSON(w, http.StatusCreated, returnVals{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	})
 }
