@@ -56,8 +56,8 @@ func main() {
 
 	mux.Handle("/app/", apiConfig.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
-	mux.HandleFunc("POST /api/validate_chirp", validateChirpsHandler)
 	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
+	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
 
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
@@ -113,60 +113,13 @@ func (cfg *apiConfig) resetMetricHandler(w http.ResponseWriter, r *http.Request)
 	w.Write([]byte("Hits reset to 0"))
 }
 
-func validateChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-	type returnVals struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
-		return
-	}
-
-	const maxChirpLength = 140
-	if len(params.Body) > maxChirpLength {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long", nil)
-		return
-	}
-
-	badWords := map[string]struct{}{
-		"kerfuffle": {},
-		"sharbert":  {},
-		"fornax":    {},
-	}
-	cleaned := cleanRequestBody(params.Body, badWords)
-
-	respondWithJSON(w, http.StatusOK, returnVals{
-		CleanedBody: cleaned,
-	})
-}
-
-func cleanRequestBody(body string, badWords map[string]struct{}) string {
-	words := strings.Split(body, " ")
-	for i, word := range words {
-		lowercaseWord := strings.ToLower(word)
-		if _, ok := badWords[lowercaseWord]; ok {
-			words[i] = "****"
-		}
-	}
-
-	cleaned := strings.Join(words, " ")
-	return cleaned
-}
-
 func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email string `json:"email"`
 	}
 	type returnVals struct {
 		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at "`
+		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Email     string    `json:"email"`
 	}
@@ -190,4 +143,78 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
 	})
+}
+
+type Chirp struct {
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	ID        uuid.UUID `json:"id"`
+	UserId    uuid.UUID `json:"user_id"`
+}
+
+func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body   string    `json:"body"`
+		UserId uuid.UUID `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
+		return
+	}
+
+	cleaned, err := validateChirp(params.Body)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error(), err)
+		return
+	}
+
+	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleaned,
+		UserID: params.UserId,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't store user", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserId:    chirp.UserID,
+	})
+}
+
+func validateChirp(body string) (string, error) {
+	const maxChirpLength = 140
+	if len(body) > maxChirpLength {
+		return "", fmt.Errorf("Chirp is too long")
+	}
+
+	badWords := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+	cleaned := cleanRequestBody(body, badWords)
+	return cleaned, nil
+}
+
+func cleanRequestBody(body string, badWords map[string]struct{}) string {
+	words := strings.Split(body, " ")
+	for i, word := range words {
+		lowercaseWord := strings.ToLower(word)
+		if _, ok := badWords[lowercaseWord]; ok {
+			words[i] = "****"
+		}
+	}
+
+	cleaned := strings.Join(words, " ")
+	return cleaned
 }
