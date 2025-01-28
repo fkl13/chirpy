@@ -58,6 +58,7 @@ func main() {
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
 	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
+	mux.HandleFunc("GET /api/chirps", apiConfig.getChirpHandler)
 
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
@@ -217,4 +218,25 @@ func cleanRequestBody(body string, badWords map[string]struct{}) string {
 
 	cleaned := strings.Join(words, " ")
 	return cleaned
+}
+
+func (cfg *apiConfig) getChirpHandler(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.dbQueries.GetChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get chirps", err)
+		return
+	}
+
+	payload := []Chirp{}
+	for _, chirp := range chirps {
+		c := Chirp{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body:      chirp.Body,
+			UserId:    chirp.UserID,
+		}
+		payload = append(payload, c)
+	}
+	respondWithJSON(w, http.StatusOK, payload)
 }
