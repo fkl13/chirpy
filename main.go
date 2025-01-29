@@ -58,7 +58,8 @@ func main() {
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
 	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
-	mux.HandleFunc("GET /api/chirps", apiConfig.getChirpHandler)
+	mux.HandleFunc("GET /api/chirps", apiConfig.getAllChirpsHandler)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getChirpHandler)
 
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
@@ -220,7 +221,7 @@ func cleanRequestBody(body string, badWords map[string]struct{}) string {
 	return cleaned
 }
 
-func (cfg *apiConfig) getChirpHandler(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	chirps, err := cfg.dbQueries.GetChirps(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't get chirps", err)
@@ -239,4 +240,25 @@ func (cfg *apiConfig) getChirpHandler(w http.ResponseWriter, r *http.Request) {
 		payload = append(payload, c)
 	}
 	respondWithJSON(w, http.StatusOK, payload)
+}
+
+func (cfg *apiConfig) getChirpHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "invalid uuid", err)
+		return
+	}
+	chirp, err := cfg.dbQueries.GetChirp(r.Context(), id)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "chirp not found", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserId:    chirp.UserID,
+	})
 }
