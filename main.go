@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fkl13/chirpy/internal/auth"
 	"github.com/fkl13/chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -57,6 +58,8 @@ func main() {
 	mux.Handle("/app/", apiConfig.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
 	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
+	mux.HandleFunc("POST /api/login", apiConfig.loginHandler)
+
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
 	mux.HandleFunc("GET /api/chirps", apiConfig.getAllChirpsHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getChirpHandler)
@@ -115,31 +118,42 @@ func (cfg *apiConfig) resetMetricHandler(w http.ResponseWriter, r *http.Request)
 	w.Write([]byte("Hits reset to 0"))
 }
 
-func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Email string `json:"email"`
-	}
-	type returnVals struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-	}
+type UserRequestBody struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
 
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
+
+func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
+	params := UserRequestBody{}
 	err := decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
 	}
 
-	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't hash password", err)
+		return
+	}
+
+	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
+	})
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't store user", err)
 		return
 	}
-	respondWithJSON(w, http.StatusCreated, returnVals{
+	respondWithJSON(w, http.StatusCreated, User{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
@@ -260,5 +274,33 @@ func (cfg *apiConfig) getChirpHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: chirp.UpdatedAt,
 		Body:      chirp.Body,
 		UserId:    chirp.UserID,
+	})
+}
+
+func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	params := UserRequestBody{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
+		return
+	}
+
+	user, err := cfg.dbQueries.GetUserByEmail(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password", err)
+		return
+	}
+
+	err = auth.CheckPasswordHash(params.Password, user.HashedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password", err)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
 	})
 }
