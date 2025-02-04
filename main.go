@@ -19,10 +19,10 @@ import (
 )
 
 type apiConfig struct {
-	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
 	jwtSecret      string
+	fileserverHits atomic.Int32
 }
 
 func main() {
@@ -68,6 +68,7 @@ func main() {
 	mux.Handle("/app/", apiConfig.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
 	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
+	mux.HandleFunc("PUT /api/users", apiConfig.updateUserHandler)
 	mux.HandleFunc("POST /api/login", apiConfig.loginHandler)
 	mux.HandleFunc("POST /api/refresh", apiConfig.refreshHandler)
 	mux.HandleFunc("POST /api/revoke", apiConfig.revokeHandler)
@@ -128,55 +129,6 @@ func (cfg *apiConfig) resetMetricHandler(w http.ResponseWriter, r *http.Request)
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Hits reset to 0"))
-}
-
-type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-}
-
-func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
-	}
-	type response struct {
-		User
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
-		return
-	}
-
-	hashedPassword, err := auth.HashPassword(params.Password)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't hash password", err)
-		return
-	}
-
-	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
-		Email:          params.Email,
-		HashedPassword: hashedPassword,
-	})
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't store user", err)
-		return
-	}
-
-	respondWithJSON(w, http.StatusCreated, response{
-		User: User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
-		},
-	})
 }
 
 type Chirp struct {
