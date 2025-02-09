@@ -69,6 +69,7 @@ func main() {
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthzHandler))
 	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
 	mux.HandleFunc("PUT /api/users", apiConfig.updateUserHandler)
+
 	mux.HandleFunc("POST /api/login", apiConfig.loginHandler)
 	mux.HandleFunc("POST /api/refresh", apiConfig.refreshHandler)
 	mux.HandleFunc("POST /api/revoke", apiConfig.revokeHandler)
@@ -76,6 +77,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
 	mux.HandleFunc("GET /api/chirps", apiConfig.getAllChirpsHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getChirpHandler)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiConfig.deleteChirpHandler)
 
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiConfig.getMetricHandler))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiConfig.resetMetricHandler))
@@ -357,6 +359,44 @@ func (cfg *apiConfig) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	err = cfg.dbQueries.RevokeToken(r.Context(), refreshToken)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't revoke token", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, nil)
+}
+
+func (cfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "No JWT provided", err)
+		return
+	}
+	userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
+		return
+	}
+
+	chirpId, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirp ID", err)
+		return
+	}
+
+	chirp, err := cfg.dbQueries.GetChirp(r.Context(), chirpId)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't get chirp", err)
+		return
+	}
+
+	if chirp.UserID != userId {
+		respondWithError(w, http.StatusForbidden, "You can't delete this chirp", err)
+		return
+	}
+
+	err = cfg.dbQueries.DeleteChirp(r.Context(), chirpId)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't delete chirp", err)
 		return
 	}
 
