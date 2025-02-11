@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/fkl13/chirpy/internal/auth"
 	"github.com/google/uuid"
 )
 
@@ -17,9 +18,19 @@ func (cfg *apiConfig) addUserSubscribtionHandler(w http.ResponseWriter, r *http.
 		} `json:"data"`
 	}
 
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "No api key provided", err)
+		return
+	}
+	if apiKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "API key is invalid", err)
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
