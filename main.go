@@ -227,7 +227,20 @@ func cleanRequestBody(body string, badWords map[string]struct{}) string {
 }
 
 func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.dbQueries.GetChirps(r.Context())
+	authorId := r.URL.Query().Get("author_id")
+	var err error
+	var chirps []database.Chirp
+	if authorId == "" {
+		chirps, err = cfg.dbQueries.GetChirps(r.Context())
+	} else {
+		id, err := uuid.Parse(authorId)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid author id", err)
+			return
+		}
+		chirps, err = cfg.dbQueries.GetChirpsByAuthor(r.Context(), id)
+	}
+
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't get chirps", err)
 		return
